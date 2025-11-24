@@ -64,7 +64,7 @@ WORKDIR /app
 COPY . .
 
 # Compile the application
-RUN g++ -std=c++14 -o webapp _main.cc -lwt -lwthttp
+RUN g++ -std=c++14 -o webapp _main.cc -include Updaters.hpp -include Results.hpp -include EventHandlers.hpp -include Design-UI.hpp -lwt -lwthttp
 
 # Expose port
 EXPOSE $PORT
