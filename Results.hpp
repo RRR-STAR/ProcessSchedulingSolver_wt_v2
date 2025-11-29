@@ -435,7 +435,7 @@ inline void ProcessSchedulingCalculator::displayIOResults(){
     
     short int arrivedProcesses = 0, totalProcesses = processes_.size(); 
     std::vector<double> processIoStartTime(totalProcesses, 0.0);
-    double executionTime = 0.5, cpuCycle = 0.0; // cpu clock cycle 
+    double executionTime = 0.0, cpuCycle = 0.0; // cpu clock cycle 
     std::vector<bool> processArrived(totalProcesses, false), processIoComplete(totalProcesses, false);
     std::vector<Process*> availableProcesses(totalProcesses, nullptr);
     std::list<Process*> readyQueue, ioQueue;
@@ -468,8 +468,31 @@ inline void ProcessSchedulingCalculator::displayIOResults(){
     while (arrivedProcesses < totalProcesses  ||  not readyQueue.empty()  ||  not ioQueue.empty()){
         
         processArrivalCheck();
+        processIoCheck();
+        
         if (readyQueue.empty()){ // when no process are in queue 
-            cpuCycle += executionTime;  processIoCheck();  continue; } 
+            // Jump to next event time instead of fixed step
+            double nextEventTime = 1e18; // Large value
+            
+            // Check next arrival
+            if (arrivedProcesses < totalProcesses) {
+                for (Process *p : availableProcesses) {
+                    if (!processArrived[p->id - 1]) {
+                        nextEventTime = std::min(nextEventTime, p->arrivalTime);
+                    }
+                }
+            }
+            // Check next IO completion
+            for (Process *p : ioQueue) {
+                double ioEndTime = processIoStartTime[p->id - 1] + p->ioTime;
+                nextEventTime = std::min(nextEventTime, ioEndTime);
+            }
+            // set the next event time accordingly based on the next event type
+            if (nextEventTime > cpuCycle && nextEventTime < 1e18) { cpuCycle = nextEventTime; }
+            else if (nextEventTime == 1e18) { break; } // Should not happen if loop condition is true
+            
+            continue; 
+        }
         
         // finding the highest priority process from arrived processes
         auto highestPriorityProcessIterator = std::max_element(readyQueue.begin(), readyQueue.end(),
@@ -483,9 +506,33 @@ inline void ProcessSchedulingCalculator::displayIOResults(){
             highestPriorityProcess->started = true;
         }
         
+        // -------------------------- Calculate execution time based on next events ---------------------------
+        // Event 1: next burst end
+        // Event 2: next arrival
+        // Event 3: next IO completion
+
+        // Check against next burst end & set the execution time to it 
+        double timeToBurstEnd = (not processIoComplete[highestPriorityProcess->id - 1]) ? 
+                                highestPriorityProcess->remainingTime : highestPriorityProcess->remainingTime2;
+        executionTime = timeToBurstEnd;
+
+        // Check against next arrival & set if the arrival is less than the current execution
+        if (arrivedProcesses < totalProcesses) {
+            for (Process *p : availableProcesses) {
+                if (not processArrived[p->id - 1]) {
+                    double timeToArrival = p->arrivalTime - cpuCycle;
+                    if (timeToArrival > 0) executionTime = std::min(executionTime, timeToArrival);
+                }
+            }
+        }
+        
+        // Check against next IO completion & set if the IO completion is less than the current execution
+        for (Process *p : ioQueue) {
+            double timeToIoEnd = (processIoStartTime[p->id - 1] + p->ioTime) - cpuCycle;
+            if (timeToIoEnd > 0) executionTime = std::min(executionTime, timeToIoEnd);
+        }
+        
         cpuCycle += executionTime; // increase the cpu cycle
-        processArrivalCheck(); // to check newly arrived processes during execution
-        processIoCheck(); // to check returned processes means, io complete processes during execution
         
         // add this process to the Gantt chart
         ganttSegments_.emplace_back(highestPriorityProcess->id, cpuCycle - executionTime, 
@@ -496,7 +543,10 @@ inline void ProcessSchedulingCalculator::displayIOResults(){
             highestPriorityProcess->remainingTime -= executionTime; 
         else highestPriorityProcess->remainingTime2 -= executionTime;
         
-        if (not processIoComplete[highestPriorityProcess->id - 1]  and  highestPriorityProcess->remainingTime <= 0.0){ // process completed it's first part
+        // Check for first burst completion using epsilon for float precision
+        bool firstBurstDone = (not processIoComplete[highestPriorityProcess->id - 1] && highestPriorityProcess->remainingTime <= 1e-9);
+
+        if (firstBurstDone){ 
             if (highestPriorityProcess->ioTime > 0){ // if the process have io time to perform
                 processIoStartTime[highestPriorityProcess->id - 1] = cpuCycle;
                 readyQueue.erase(highestPriorityProcessIterator);
@@ -504,20 +554,17 @@ inline void ProcessSchedulingCalculator::displayIOResults(){
             }
             else processIoComplete[highestPriorityProcess->id - 1] = true; // if no io time, then consider io complete
         }
-        if (processIoComplete[highestPriorityProcess->id - 1]  and  highestPriorityProcess->remainingTime2 <= 0.0){ // process completed
+        
+        // Check for second burst completion using epsilon for float precision
+        bool secondBurstDone = (processIoComplete[highestPriorityProcess->id - 1] && highestPriorityProcess->remainingTime2 <= 1e-9);
+        
+        if (secondBurstDone){ // process completed
             highestPriorityProcess->completionTime = cpuCycle;
             highestPriorityProcess->turnaroundTime = highestPriorityProcess->completionTime - highestPriorityProcess->arrivalTime;
             highestPriorityProcess->waitingTime    = highestPriorityProcess->turnaroundTime - 
                                                     (highestPriorityProcess->burstTime + highestPriorityProcess->burstTime2);
             readyQueue.erase(highestPriorityProcessIterator);
         }
-        
-        /* ---------------- for debugging purpose (debug with cpuCycle increment +1) -------------------
-        std::cout <<std::endl<< highestPriorityProcess->id <<" : "<< cpuCycle <<" : "<< highestPriorityProcess->remainingTime <<std::endl;
-        for (Process *p : readyQueue)  std::cout <<" "<< p->id <<"|"<< p->remainingTime <<"|"<< p->remainingTime2;
-        std::cout <<std::endl<<" ioQueue  ";
-        for (Process *p : ioQueue)  std::cout <<" "<< p->id <<"|"<< p->remainingTime <<"|"<< p->remainingTime2;
-        */
     }
     availableProcesses.clear();
     

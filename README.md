@@ -2,7 +2,8 @@
 
 A powerful web-based tool for visualizing and calculating various CPU process scheduling algorithms. Built with C++ and the Wt (Web Toolkit) library, this application provides an interactive interface to understand how different scheduling algorithms manage process execution.
 
-### [Live Demo](https://process-scheduling-solver-v2.onrender.com/)
+### [Live Demo](https://processschedulingsolver-wt-v2.onrender.com/)
+**Note**: It may take some time to load the site for the first time as it is deployed on a free server.
 
 ## 🚀 Features
 
